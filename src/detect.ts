@@ -1,11 +1,12 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-export type Runtime = "node" | "python" | "go" | "applescript" | "unknown";
+export type Runtime = "node" | "python" | "go" | "applescript" | "monorepo" | "unknown";
 
 export type Framework =
   | "next"
   | "nuxt"
+  | "hono"
   | "express"
   | "fastify"
   | "nestjs"
@@ -14,6 +15,7 @@ export type Framework =
   | "flask"
   | "gin"
   | "echo"
+  | "vite"
   | "plain";
 
 export type Detection = {
@@ -23,13 +25,21 @@ export type Detection = {
 };
 
 export async function detect(cwd: string): Promise<Detection> {
+  // Check for monorepo workspace roots before treating package.json as a single Node app.
+  const pkgManager = await detectNodePackageManager(cwd);
+  if (await exists(join(cwd, "pnpm-workspace.yaml"))) {
+    return { runtime: "monorepo", framework: "plain", packageManager: pkgManager };
+  }
   if (await exists(join(cwd, "package.json"))) {
     const pkg = JSON.parse(await readFile(join(cwd, "package.json"), "utf8"));
+    if (pkg.workspaces) {
+      return { runtime: "monorepo", framework: "plain", packageManager: pkgManager };
+    }
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
     return {
       runtime: "node",
       framework: detectNodeFramework(deps),
-      packageManager: await detectNodePackageManager(cwd),
+      packageManager: pkgManager,
     };
   }
 
@@ -88,6 +98,8 @@ function detectNodeFramework(deps: Record<string, string>): Framework {
   if (deps["@nestjs/core"]) return "nestjs";
   if (deps.fastify) return "fastify";
   if (deps.express) return "express";
+  if (deps.hono) return "hono";
+  if (deps.vite) return "vite";
   return "plain";
 }
 

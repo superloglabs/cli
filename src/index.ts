@@ -7,7 +7,7 @@ import {
   runAgentStatus,
   runAgentUninstall,
 } from "./commands/agent.js";
-import { runInit } from "./commands/init.js";
+import { runInit, runInitNonInteractive } from "./commands/init.js";
 
 await yargs(hideBin(process.argv))
   .scriptName("superlog")
@@ -15,13 +15,47 @@ await yargs(hideBin(process.argv))
     ["init", "$0"],
     "Instrument this project and verify ingest",
     (y) =>
-      y.option("cwd", {
-        type: "string",
-        default: process.cwd(),
-        describe: "Project directory to instrument",
-      }),
+      y
+        .option("cwd", {
+          type: "string",
+          default: process.cwd(),
+          describe: "Project directory to instrument",
+        })
+        .option("non-interactive", {
+          type: "boolean",
+          default: false,
+          describe: "Skip the TUI — print events to stdout, exit non-zero on failure",
+        })
+        .option("token", {
+          type: "string",
+          describe: "CLI session token (superlog_cli_*); falls back to SUPERLOG_TOKEN env var or cached login",
+        })
+        .option("ingest-key", {
+          type: "string",
+          describe: "Project ingest key (superlog_live_*); falls back to SUPERLOG_INGEST_KEY env var or cached login",
+        })
+        .option("gateway-url", {
+          type: "string",
+          describe: "LLM gateway base URL (overrides SUPERLOG_GATEWAY_URL)",
+        })
+        .option("region", {
+          type: "string",
+          describe: "OTLP ingest base URL written into the project env file (overrides SUPERLOG_INGEST_URL)",
+        }),
     async (argv) => {
-      await runInit({ cwd: argv.cwd });
+      const nonInteractive =
+        argv["non-interactive"] || !!argv.token || !!argv["ingest-key"];
+      if (nonInteractive) {
+        await runInitNonInteractive({
+          cwd: argv.cwd,
+          token: argv.token,
+          ingestKey: argv["ingest-key"],
+          gatewayUrl: argv["gateway-url"],
+          region: argv.region,
+        });
+      } else {
+        await runInit({ cwd: argv.cwd });
+      }
     },
   )
   .command(

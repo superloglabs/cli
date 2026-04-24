@@ -6,8 +6,12 @@ import {
   buildTaskPrompt,
 } from "./prompt.js";
 
+export type AgentTask = { path: string; framework: string };
+
 export type AgentEvent =
   | { kind: "status"; message: string }
+  | { kind: "tasks"; tasks: AgentTask[] }
+  | { kind: "task-done"; path: string }
   | { kind: "tool"; name: string; summary: string }
   | { kind: "text"; message: string }
   | { kind: "report"; report: AgentReport }
@@ -22,9 +26,10 @@ export type RunAgentOptions = {
   signal?: AbortSignal;
 };
 
-const MODEL = "claude-sonnet-4-6";
-
-const ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"];
+const MODEL = "claude-opus-4-7[1m]";
+const ALLOWED_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"];
+const MAX_TURNS_DEFAULT = 30;
+const MAX_TURNS_MONOREPO = 150;
 
 export async function runAgent(opts: RunAgentOptions): Promise<void> {
   // Route the agent SDK through the superlog gateway. The SDK reads these at import
@@ -69,7 +74,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<void> {
         systemPrompt: buildSystemPrompt(),
         permissionMode: "acceptEdits",
         allowedTools: ALLOWED_TOOLS,
-        maxTurns: 30,
+        maxTurns: opts.input.detection.runtime === "monorepo" ? MAX_TURNS_MONOREPO : MAX_TURNS_DEFAULT,
       },
     });
 
@@ -127,6 +132,11 @@ function parseMarkers(text: string, emit: (e: AgentEvent) => void): void {
     if (!trimmed) continue;
     if (trimmed.startsWith(AGENT_MARKERS.status)) {
       emit({ kind: "status", message: trimmed.slice(AGENT_MARKERS.status.length).trim() });
+    } else if (trimmed.startsWith(AGENT_MARKERS.tasks)) {
+      const tasks = parseTasks(trimmed.slice(AGENT_MARKERS.tasks.length).trim());
+      if (tasks) emit({ kind: "tasks", tasks });
+    } else if (trimmed.startsWith(AGENT_MARKERS.taskDone)) {
+      emit({ kind: "task-done", path: trimmed.slice(AGENT_MARKERS.taskDone.length).trim() });
     } else if (trimmed.startsWith(AGENT_MARKERS.report)) {
       const report = parseReport(trimmed.slice(AGENT_MARKERS.report.length).trim());
       if (report) emit({ kind: "report", report });
@@ -141,6 +151,19 @@ function parseMarkers(text: string, emit: (e: AgentEvent) => void): void {
     } else {
       emit({ kind: "text", message: trimmed });
     }
+  }
+}
+
+function parseTasks(payload: string): AgentTask[] | null {
+  try {
+    const parsed = JSON.parse(payload);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (t): t is AgentTask =>
+        t && typeof t.path === "string" && t.path.trim() && typeof t.framework === "string",
+    );
+  } catch {
+    return null;
   }
 }
 

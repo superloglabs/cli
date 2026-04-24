@@ -2,7 +2,7 @@ import { Spinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import type { AgentReport } from "../../agent/prompt.js";
-import { type AgentEvent, runAgent } from "../../agent/runner.js";
+import { type AgentEvent, type AgentTask, runAgent } from "../../agent/runner.js";
 import type { Detection } from "../../detect.js";
 import { Colors, Icons } from "../theme.js";
 
@@ -20,6 +20,7 @@ type Props = {
 };
 
 type ToolLine = { id: number; name: string; summary: string };
+type TaskItem = AgentTask & { done: boolean };
 
 const MAX_TOOL_LINES = 5;
 
@@ -37,6 +38,7 @@ export const AgentStep: React.FC<Props> = ({
 }) => {
   const [status, setStatus] = useState<string>("Starting install agent…");
   const [tools, setTools] = useState<ToolLine[]>([]);
+  const [taskList, setTaskList] = useState<TaskItem[]>([]);
   const toolIdRef = useRef(0);
   const startedRef = useRef(false);
 
@@ -48,6 +50,14 @@ export const AgentStep: React.FC<Props> = ({
       switch (ev.kind) {
         case "status":
           setStatus(ev.message);
+          return;
+        case "tasks":
+          setTaskList(ev.tasks.map((t) => ({ ...t, done: false })));
+          return;
+        case "task-done":
+          setTaskList((prev) =>
+            prev.map((t) => (t.path === ev.path ? { ...t, done: true } : t)),
+          );
           return;
         case "tool":
           if (!ev.summary) return;
@@ -82,6 +92,19 @@ export const AgentStep: React.FC<Props> = ({
 
   return (
     <Box flexDirection="column">
+      {taskList.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          {taskList.map((t) => (
+            <Box key={t.path}>
+              <Text color={t.done ? Colors.success : Colors.muted}>
+                {t.done ? `  ${Icons.check} ` : "  ○ "}
+              </Text>
+              <Text color={t.done ? Colors.fg : Colors.muted}>{t.path}</Text>
+              <Text color={Colors.subtle}>{`  ${t.framework}`}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
       <Spinner label={status} />
       {tools.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
