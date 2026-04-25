@@ -37,3 +37,11 @@ export function saveAuth(auth: StoredAuth): void {
   fs.mkdirSync(DIR, { recursive: true });
   fs.writeFileSync(FILE, `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 });
 }
+
+export function clearAuth(): void {
+  try {
+    fs.unlinkSync(FILE);
+  } catch {
+    // already gone — fine
+  }
+}
