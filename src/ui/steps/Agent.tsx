@@ -105,7 +105,9 @@ export const AgentStep: React.FC<Props> = ({
                 {t.done ? `  ${Icons.check} ` : "  ○ "}
               </Text>
               <Text color={t.done ? Colors.fg : Colors.muted}>{t.path}</Text>
-              <Text color={Colors.subtle}>{`  ${t.framework}`}</Text>
+              <Text color={Colors.subtle}>
+                {`  ${t.framework}${t.subFrameworks?.length ? ` + ${t.subFrameworks.join(", ")}` : ""}`}
+              </Text>
             </Box>
           ))}
         </Box>

@@ -40,7 +40,10 @@ export async function runInitNonInteractive(args: NonInteractiveOptions): Promis
   }
 
   const detection = await detect(args.cwd);
-  console.log(`detect  ${detection.runtime}/${detection.framework}  (${detection.packageManager})`);
+  const subSuffix = detection.subFrameworks.length ? ` + ${detection.subFrameworks.join(", ")}` : "";
+  console.log(
+    `detect  ${detection.runtime}/${detection.framework}${subSuffix}  (${detection.packageManager})`,
+  );
 
   let failed = false;
   const taskList: (AgentTask & { done: boolean })[] = [];
@@ -56,7 +59,8 @@ export async function runInitNonInteractive(args: NonInteractiveOptions): Promis
           for (const t of event.tasks) taskList.push({ ...t, done: false });
           console.log("\ntasks:");
           for (const t of taskList) {
-            console.log(`  ○  ${t.path.padEnd(24)} ${t.framework}`);
+            const subs = t.subFrameworks?.length ? ` + ${t.subFrameworks.join(", ")}` : "";
+            console.log(`  ○  ${t.path.padEnd(24)} ${t.framework}${subs}`);
           }
           console.log();
           break;

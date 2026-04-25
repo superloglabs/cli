@@ -7,7 +7,7 @@ import {
   buildTaskPrompt,
 } from "./prompt.js";
 
-export type AgentTask = { path: string; framework: string };
+export type AgentTask = { path: string; framework: string; subFrameworks?: string[] };
 
 export type AgentEvent =
   | { kind: "status"; message: string }
@@ -163,10 +163,18 @@ function parseTasks(payload: string): AgentTask[] | null {
   try {
     const parsed = JSON.parse(payload);
     if (!Array.isArray(parsed)) return null;
-    return parsed.filter(
-      (t): t is AgentTask =>
-        t && typeof t.path === "string" && t.path.trim() && typeof t.framework === "string",
-    );
+    return parsed
+      .filter(
+        (t): t is { path: string; framework: string; subFrameworks?: unknown } =>
+          t && typeof t.path === "string" && t.path.trim() && typeof t.framework === "string",
+      )
+      .map((t) => ({
+        path: t.path,
+        framework: t.framework,
+        subFrameworks: Array.isArray(t.subFrameworks)
+          ? t.subFrameworks.filter((s): s is string => typeof s === "string")
+          : undefined,
+      }));
   } catch {
     return null;
   }
