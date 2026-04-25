@@ -1,6 +1,7 @@
 import {
   AGENT_MARKERS,
   type AgentInput,
+  type AgentRecap,
   type AgentReport,
   buildSystemPrompt,
   buildTaskPrompt,
@@ -15,6 +16,7 @@ export type AgentEvent =
   | { kind: "tool"; name: string; summary: string }
   | { kind: "text"; message: string }
   | { kind: "report"; report: AgentReport }
+  | { kind: "recap"; recap: AgentRecap }
   | { kind: "done"; message?: string }
   | { kind: "partial"; reason: string }
   | { kind: "abort"; reason: string }
@@ -142,6 +144,9 @@ function parseMarkers(text: string, emit: (e: AgentEvent) => void): void {
       if (report) emit({ kind: "report", report });
       // silently drop malformed reports — the Verify step falls back to
       // heuristic service-name derivation so this isn't fatal.
+    } else if (trimmed.startsWith(AGENT_MARKERS.recap)) {
+      const recap = parseRecap(trimmed.slice(AGENT_MARKERS.recap.length).trim());
+      if (recap) emit({ kind: "recap", recap });
     } else if (trimmed.startsWith(AGENT_MARKERS.partial)) {
       emit({ kind: "partial", reason: trimmed.slice(AGENT_MARKERS.partial.length).trim() });
     } else if (trimmed.startsWith(AGENT_MARKERS.abort)) {
@@ -162,6 +167,21 @@ function parseTasks(payload: string): AgentTask[] | null {
       (t): t is AgentTask =>
         t && typeof t.path === "string" && t.path.trim() && typeof t.framework === "string",
     );
+  } catch {
+    return null;
+  }
+}
+
+function parseRecap(payload: string): AgentRecap | null {
+  try {
+    const parsed = JSON.parse(payload) as { items?: unknown };
+    if (!Array.isArray(parsed.items)) return null;
+    const items = parsed.items
+      .filter((s): s is string => typeof s === "string")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (items.length === 0) return null;
+    return { items };
   } catch {
     return null;
   }

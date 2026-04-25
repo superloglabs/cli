@@ -1,4 +1,4 @@
-import type { AgentReport } from "../agent/prompt.js";
+import type { AgentRecap, AgentReport } from "../agent/prompt.js";
 import type { Detection } from "../detect.js";
 
 export type StepId = "detect" | "auth" | "agent" | "verify";
@@ -31,6 +31,8 @@ export type WizardState = {
   /** What the install agent reported it configured — service name + signals.
    *  The Verify step uses this to query for real telemetry. */
   report?: AgentReport;
+  /** Free-form summary of changes the agent made — shown on the done/partial screens. */
+  recap?: AgentRecap;
 };
 
 export function nextStep(current: StepId): StepId | "done" {

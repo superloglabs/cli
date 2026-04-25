@@ -77,6 +77,11 @@ export async function runInitNonInteractive(args: NonInteractiveOptions): Promis
         case "report":
           console.log(`report  ${JSON.stringify(event.report)}`);
           break;
+        case "recap":
+          console.log("\nWhat changed:");
+          for (const item of event.recap.items) console.log(`  • ${item}`);
+          console.log();
+          break;
         case "done":
           console.log("done");
           break;

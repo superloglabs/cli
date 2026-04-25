@@ -1,5 +1,6 @@
 import { Box, Text, useApp } from "ink";
 import React, { useEffect, useState } from "react";
+import type { AgentRecap } from "../agent/prompt.js";
 import type { StoredAuth } from "../auth/store.js";
 import type { Detection } from "../detect.js";
 import { StepList } from "./StepList.js";
@@ -11,6 +12,21 @@ import { type StepId, type WizardState, nextStep } from "./steps.js";
 import { Colors, Icons } from "./theme.js";
 
 type Props = { cwd: string };
+
+const Recap: React.FC<{ recap?: AgentRecap }> = ({ recap }) => {
+  if (!recap || recap.items.length === 0) return null;
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={Colors.muted}>What changed:</Text>
+      {recap.items.map((item, i) => (
+        <Box key={i}>
+          <Text color={Colors.subtle}>{`  ${Icons.dot} `}</Text>
+          <Text color={Colors.fg}>{item}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
+};
 
 const DEFAULT_GATEWAY_URL = process.env.SUPERLOG_GATEWAY_URL ?? "https://api.superlog.sh";
 const DEFAULT_INGEST_URL = process.env.SUPERLOG_INGEST_URL ?? "https://intake.superlog.sh";
@@ -96,6 +112,7 @@ export const App: React.FC<Props> = ({ cwd }) => {
               ingestKey={state.ingestKey}
               gatewayUrl={state.gatewayUrl}
               onReport={(report) => setState((s) => ({ ...s, report }))}
+              onRecap={(recap) => setState((s) => ({ ...s, recap }))}
               onComplete={() => advance({})}
               onPartial={partial}
               onFail={fail}
@@ -114,9 +131,12 @@ export const App: React.FC<Props> = ({ cwd }) => {
           />
         )}
         {state.step === "done" && (
-          <Text color={Colors.success}>
-            {Icons.check} You're wired up. Errors in → fixes out.
-          </Text>
+          <Box flexDirection="column">
+            <Text color={Colors.success}>
+              {Icons.check} You're wired up. Errors in → fixes out.
+            </Text>
+            <Recap recap={state.recap} />
+          </Box>
         )}
         {state.step === "partial" && (
           <Box flexDirection="column">
@@ -126,6 +146,7 @@ export const App: React.FC<Props> = ({ cwd }) => {
             <Text color={Colors.muted}>
               Your project is configured. Spans will flow once ingest is reachable.
             </Text>
+            <Recap recap={state.recap} />
           </Box>
         )}
         {state.step === "failed" && (

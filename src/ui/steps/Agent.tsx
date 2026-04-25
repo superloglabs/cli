@@ -1,7 +1,7 @@
 import { Spinner } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import React, { useEffect, useRef, useState } from "react";
-import type { AgentReport } from "../../agent/prompt.js";
+import type { AgentRecap, AgentReport } from "../../agent/prompt.js";
 import { type AgentEvent, type AgentTask, runAgent } from "../../agent/runner.js";
 import type { Detection } from "../../detect.js";
 import { Colors, Icons } from "../theme.js";
@@ -14,6 +14,7 @@ type Props = {
   ingestKey: string;
   gatewayUrl: string;
   onReport: (report: AgentReport) => void;
+  onRecap: (recap: AgentRecap) => void;
   onComplete: () => void;
   onPartial: (reason: string) => void;
   onFail: (reason: string) => void;
@@ -32,6 +33,7 @@ export const AgentStep: React.FC<Props> = ({
   ingestKey,
   gatewayUrl,
   onReport,
+  onRecap,
   onComplete,
   onPartial,
   onFail,
@@ -69,6 +71,9 @@ export const AgentStep: React.FC<Props> = ({
         case "report":
           onReport(ev.report);
           return;
+        case "recap":
+          onRecap(ev.recap);
+          return;
         case "done":
           onComplete();
           return;
@@ -88,7 +93,7 @@ export const AgentStep: React.FC<Props> = ({
       input: { cwd, detection, region, token, ingestKey, gatewayUrl },
       onEvent: handleEvent,
     });
-  }, [cwd, detection, region, token, ingestKey, gatewayUrl, onReport, onComplete, onPartial, onFail]);
+  }, [cwd, detection, region, token, ingestKey, gatewayUrl, onReport, onRecap, onComplete, onPartial, onFail]);
 
   return (
     <Box flexDirection="column">
