@@ -6,7 +6,6 @@ Install (use the project's package manager — `pip install` for requirements.tx
   opentelemetry-distro
   opentelemetry-exporter-otlp-proto-http
   opentelemetry-instrumentation-fastapi
-  opentelemetry-instrumentation-logging
   opentelemetry-instrumentation-requests
   opentelemetry-instrumentation-httpx
   opentelemetry-instrumentation-asyncpg     # only if asyncpg is used
@@ -14,7 +13,7 @@ Install (use the project's package manager — `pip install` for requirements.tx
   opentelemetry-instrumentation-sqlalchemy  # only if SQLAlchemy is used
   opentelemetry-instrumentation-redis       # only if redis is used
 
-Skip DB/cache instrumentations the project doesn't actually depend on — check the manifest first. Suppress install output: append `> /dev/null 2>&1; echo "exit:$?"`.
+Skip DB/cache instrumentations the project doesn't actually depend on — check the manifest first. Suppress install output: append `> /dev/null 2>&1; echo "exit:$?"`. Do NOT install `opentelemetry-instrumentation-logging` — it secretly adds a second LoggingHandler, causing double-export when combined with the SDK's own. The fallback path below uses the SDK handler directly.
 
 Bootstrap — preferred path is the `opentelemetry-instrument` CLI wrapper. Identify how the project starts uvicorn / hypercorn / fastapi-cli (check pyproject scripts, Procfile, Dockerfile CMD, README, or a shell script in the repo root). Prepend `opentelemetry-instrument` to that command. Examples:
 
@@ -29,18 +28,23 @@ Bootstrap — preferred path is the `opentelemetry-instrument` CLI wrapper. Iden
 
 If the project has a `scripts` entry in pyproject.toml ([tool.poetry.scripts] or [project.scripts]) that wraps the start command, edit that script's invocation rather than every call site. If the project starts via `if __name__ == "__main__": uvicorn.run(...)`, the CLI wrapper still works — wrap `python <entry>.py`.
 
-Fallback path (only if the start command can't be wrapped — e.g. the project embeds uvicorn.run() inside a function called from elsewhere): create a `tracing.py` module at the project root and import it as the very first line of the entry module, before `from fastapi import FastAPI`:
+Fallback path (only if the start command can't be wrapped — e.g. the project embeds uvicorn.run() inside a function called from elsewhere): create a `tracing.py` module at the project root and import it as the very first line of the entry module, before `from fastapi import FastAPI`. This sets up traces, metrics, AND structured logs in one place:
 
   # tracing.py
+  import logging
   import os
-  from opentelemetry import trace
+  from opentelemetry import metrics, trace
+  from opentelemetry._logs import set_logger_provider
   from opentelemetry.sdk.resources import Resource
   from opentelemetry.sdk.trace import TracerProvider
   from opentelemetry.sdk.trace.export import BatchSpanProcessor
+  from opentelemetry.sdk.metrics import MeterProvider
+  from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+  from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+  from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
   from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-  from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-  from opentelemetry.instrumentation.logging import LoggingInstrumentor
-  from opentelemetry.instrumentation.requests import RequestsInstrumentor
+  from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+  from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
   if not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or not os.getenv("OTEL_EXPORTER_OTLP_HEADERS"):
       raise RuntimeError(
@@ -48,12 +52,33 @@ Fallback path (only if the start command can't be wrapped — e.g. the project e
       )
 
   resource = Resource.create({"service.name": os.getenv("OTEL_SERVICE_NAME", "<derive-from-pyproject>")})
-  provider = TracerProvider(resource=resource)
-  provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-  trace.set_tracer_provider(provider)
 
-  LoggingInstrumentor().instrument(set_logging_format=True)
+  # Traces
+  tp = TracerProvider(resource=resource)
+  tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+  trace.set_tracer_provider(tp)
+
+  # Metrics
+  mp = MeterProvider(resource=resource, metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter())])
+  metrics.set_meter_provider(mp)
+
+  # Logs — LoggingHandler on the root logger forwards every logger.* call to OTLP
+  # AND stamps each record with the trace_id/span_id of the active span. Do NOT
+  # use opentelemetry.instrumentation.logging.LoggingInstrumentor here: it
+  # silently adds a SECOND LoggingHandler from its own package, causing double
+  # OTLP records for every log line. One handler is enough.
+  lp = LoggerProvider(resource=resource)
+  lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+  set_logger_provider(lp)
+  logging.getLogger().addHandler(LoggingHandler(level=logging.NOTSET, logger_provider=lp))
+
+  # Auto-instrumentation. Imported INSIDE this module so a future import of
+  # tracing.py from a context without these libs (tests, slim CLI) doesn't crash.
+  from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+  from opentelemetry.instrumentation.requests import RequestsInstrumentor
+  HTTPXClientInstrumentor().instrument()
   RequestsInstrumentor().instrument()
+  # If asyncpg or sqlalchemy is in the project, instrument them here too.
   # FastAPIInstrumentor.instrument_app(app) is called from main.py after `app = FastAPI(...)`
 
 Then in the entry module:
@@ -64,6 +89,13 @@ Then in the entry module:
 
   app = FastAPI()
   FastAPIInstrumentor.instrument_app(app)
+
+Tracer and meter handles can be obtained at the top of any module — they are proxies that resolve to the real provider once `tracing` has been imported, so it's safe to write `tracer = trace.get_tracer(__name__)` at module level even in files imported before `tracing.py`:
+
+  # any business module
+  from opentelemetry import metrics, trace
+  tracer = trace.get_tracer(__name__)
+  meter = metrics.get_meter(__name__)
 
 Prefer the CLI wrapper. The fallback exists because some projects can't be wrapped cleanly (e.g. embedded uvicorn invocations behind a custom CLI).
 

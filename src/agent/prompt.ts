@@ -161,14 +161,16 @@ Read selectively and small. Check line count before reading (\`wc -l\`). For fil
 
 ${recipeFor(input.detection)}
 ${subRecipeBlock(input.detection.subFrameworks)}
---- STEP 3: ADD CUSTOM SPANS ---
+--- STEP 3: ADD CUSTOM SPANS, METRICS, AND LOGS ---
 
-Using the operations identified in Step 1, add manual instrumentation on top of the auto-instrumentation from the bootstrap. Get the tracer once at the module level and reuse it:
+Using the operations identified in Step 1, add manual instrumentation on top of the auto-instrumentation. The bootstrap already gives you HTTP in/out, DB queries, and stdlib logs — your job is to add the **business-level** signals that an SRE would want when something looks wrong.
+
+Three signals to add, in order of leverage:
+
+**(a) Custom spans on critical operations.** Get the tracer once at module level and reuse it:
 
   import { trace, SpanStatusCode } from "@opentelemetry/api";
   const tracer = trace.getTracer(process.env.OTEL_SERVICE_NAME ?? "<service-name>");
-
-Wrap each critical operation:
 
   // async handler example
   async function processOrder(orderId: string) {
@@ -188,11 +190,53 @@ Wrap each critical operation:
     });
   }
 
-Naming: use "domain.verb" (e.g. "payment.charge", "email.send", "cache.invalidate", "incident.fingerprint", "agent.run").
-Attributes: entity IDs, user IDs, counts, key boolean branch outcomes. Never log PII (emails, passwords, tokens, raw request bodies).
-What to skip: trivial getters, pure data transforms, internal helpers, anything already covered by auto-instrumentation (HTTP in/out, DB queries). Only wrap operations with real latency or meaningful failure modes.
+Naming: use "domain.verb" (e.g. "payment.charge", "email.send", "cache.invalidate", "agent.run", "interview.create", "job.<type>").
+Attributes: entity IDs (order.id, user.id, workspace.id, tenant.id), counts, key boolean branch outcomes. Never log PII (emails, passwords, tokens, raw request bodies).
+What to skip: trivial getters, pure data transforms, internal helpers, anything already covered by auto-instrumentation. Only wrap operations with real latency or meaningful failure modes.
 
-For browser/Vite projects, instrument key user interactions instead:
+In Python the decorator form is cleaner when attributes can be set at the start of the function — no manual context manager:
+
+  from opentelemetry import trace
+  tracer = trace.get_tracer("<service-name>")
+
+  @tracer.start_as_current_span("interview.create")
+  async def create_interview(body, user):
+      trace.get_current_span().set_attributes({"workspace.id": str(body.workspace_id), "interview.channel": body.channel})
+      # ... function body
+
+**(b) Custom metrics for the business funnel and durations.** Spans tell you about individual requests; metrics tell you about rates and distributions. Get a meter once and create instruments at module level:
+
+  import { metrics } from "@opentelemetry/api";
+  const meter = metrics.getMeter(process.env.OTEL_SERVICE_NAME ?? "<service-name>");
+
+  // Counters at funnel events
+  const ordersCreated = meter.createCounter("orders.created", { description: "Orders placed" });
+  const ordersCompleted = meter.createCounter("orders.completed", { description: "Orders that reached fulfilled state" });
+  const ordersFailed = meter.createCounter("orders.failed");
+
+  // Histograms for durations and sizes
+  const orderProcessMs = meter.createHistogram("order.process_ms", { unit: "ms" });
+  const orderItemCount = meter.createHistogram("order.item_count", { unit: "1" });
+
+  // Increment with low-cardinality dimensions only
+  ordersCreated.add(1, { "order.channel": channel, "tenant.id": tenantId });
+  orderProcessMs.record(elapsedMs, { "order.channel": channel });
+
+What to count: every funnel boundary (created, started, completed, failed, retried), every job kick-off, every retry, every external-API call to a paid provider. What to histogram: any operation with measurable latency, queue depth, batch size. Dimension cardinality must stay low (channel, status, region — never user.id or order.id).
+
+Python equivalent:
+
+  from opentelemetry import metrics
+  meter = metrics.get_meter("<service-name>")
+  orders_created = meter.create_counter("orders.created")
+  order_process_ms = meter.create_histogram("order.process_ms", unit="ms")
+  orders_created.add(1, {"order.channel": channel})
+
+**(c) Logs.** If the bootstrap wires up an OTLP log handler (the recipe takes care of this), then every \`logger.info/error/...\` call inside a span automatically carries the span's \`trace_id\` and \`span_id\` in the OTLP record. You don't need to add anything — just keep using the project's existing logger. Do NOT manually add trace IDs to log messages; the bridge handles it.
+
+If you're tempted to log a structured event ("order created", with fields), prefer a counter or a span attribute instead. Use logs for narrative ("starting batch reconcile", "retrying after 3xx") and exceptional events.
+
+For browser/Vite projects, instrument key user interactions:
 
   import { trace, SpanStatusCode } from "@opentelemetry/api";
   const tracer = trace.getTracer(import.meta.env.VITE_OTEL_SERVICE_NAME ?? "<service-name>");
@@ -212,6 +256,8 @@ For browser/Vite projects, instrument key user interactions instead:
       }
     });
   }
+
+**Reuse what's already measured.** If the project already collects timestamps for some operation (a custom \`LatencyTracker\`, a \`time.perf_counter()\` block, a "[TIMING]" log line), emit a histogram from those existing measurements instead of measuring twice. Both your custom span and the existing log can stay — the span gives you traceability, the histogram gives you aggregates.
 
 --- STEP 4: VERIFY ---
 
