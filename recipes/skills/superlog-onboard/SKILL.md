@@ -11,7 +11,7 @@ You don't need framework-specific recipes for this. Modern OTel SDKs are well-do
 
 ## Step 0 — Endpoint and key handling
 
-The **OTLP endpoint** is always `https://ingest.superlog.sh`.
+The **OTLP endpoint** is always `https://intake.superlog.sh`.
 
 The **ingest API key** starts with `superlog_live_` and is project-scoped + write-only. It's a secret: **never embed it as a literal in source files.** It only ever goes into env files (`.env.local`, `.env.superlog`, the language equivalent) read at runtime.
 
